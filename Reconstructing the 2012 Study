@@ -1,0 +1,304 @@
+# This code reconstructs the 2012 analysis by A.R. Vannatta, R.H. Hauer, and N.M. Schuettpelz (https://doi-org.myaccess.library.utoronto.ca/10.1603/EC11130)
+
+
+import math
+import matplotlib.pyplot as plt
+import numpy as np
+
+# CTLA value calculation functions
+def calculate_ash_ctla_value(dbh, replacement_cost, condition_rating, location_factor, species_rating):
+    return (math.pi * ((dbh / 2) ** 2)) * replacement_cost * condition_rating * location_factor * species_rating
+
+def calculate_nonash_ctla_value(dbh, replacement_cost, condition_rating, location_factor, species_rating):
+    return (math.pi * ((dbh / 2) ** 2)) * replacement_cost * condition_rating * location_factor * species_rating
+
+# CTLA Parameters for Ash and Non-Ash Trees
+replacement_cost_per_cm_ash = 4.93
+condition_rating_ash = 0.75
+location_factor_ash = 0.7
+species_rating_ash = 0.7
+
+replacement_cost_per_cm_nonash = 4.93
+condition_rating_nonash = 0.75
+location_factor_nonash = 0.7
+species_rating_nonash = 0.7
+
+# Shared Parameters
+years = 20
+starting_ash_trees = 155
+background_mortality_rate = 0.02  # Background mortality rate for ash trees
+starting_diameter = 20.6 # Starting ash diameter in cm
+growth_rate = 1.01  # Growth rate of ash in cm
+
+# Replanting Data
+starting_diameter_new = 2.5 # Starting diameter of replanted trees in cm
+growth_rate_new = 2.01  # Growth rate of replanted trees in cm
+new_tree_mortality_rate = 0.02 # Mortality rate of replanted trees
+
+# Parameters specific to Control simulation
+replant_per_year_control = 0
+stage2_start_year_control = 1 # Starting year of EAB invasion
+stage3_start_year_control = 7 # Starting year of EAB Surge
+Rn_control = 0.99 # Normal ash survival rate without EAB present
+Rs_control = 0.80 # Ash survival rate after tipping point with EAB present
+Na_control = 0.01 # Normal ash mortality rate without EAB present
+
+# Parameters specific to Removal and Replant simulation
+removal_start_year = 1  # Year to start removals
+replant_start_year = 1  # Year to start replanting
+stage4_start_year = 6 # Year when replanting is no longer conducted
+removal_percentage = 0.20 # Percentage of starting ash trees removed preemptively each year
+
+# Parameters specific to insecticide simulation
+eab_mortality_rate = 0.01  # Mortality rate due to EAB
+stage2_start_year = 1  # Year EAB starts impacting trees
+stage3_start_year = 7  # Year EAB surge starts
+
+# Simulation for Control (No Intervention)
+def simulate_control(years, starting_ash_trees, replant_per_year, stage2_start_year, stage3_start_year, Rn, Rs, Na, starting_diameter, growth_rate):
+    # Initialize variables
+    remaining_ash_trees = starting_ash_trees
+    cumulative_mortality = 0
+    cumulative_replanted = 0
+    current_diameter = starting_diameter
+    ctla_values_control = []  # List to store CTLA values
+
+    # Lists for plotting
+    years_x = [0]  # Include year 0
+    remaining_ash_trees_y = [starting_ash_trees]
+    cumulative_basal_area_y = [np.pi * (starting_diameter / 2)**2 * starting_ash_trees]  # Initial basal area
+
+    for year in range(1, years + 1):
+        # Add year to x-axis list
+        years_x.append(year)
+
+        # Update diameter for this year
+        current_diameter += growth_rate
+
+        if year < stage2_start_year:
+            # Stage 1 (Pre-EAB)
+            mortality_rate = Na
+        elif year < stage3_start_year:
+            # Stage 2 (EAB Arrived)
+            Yn = year - stage2_start_year
+            mortality_rate = ((Rn - Rs) / (1 + math.exp(4 - Yn))) + Na
+        else:
+            # Stage 3 (EAB Surge)
+            mortality_rate = 1 - Rs
+
+        # Calculate annual mortality
+        annual_mortality = round(remaining_ash_trees * mortality_rate)
+        remaining_ash_trees -= annual_mortality
+        cumulative_mortality += annual_mortality
+
+        # Calculate basal area
+        basal_area = np.pi * (current_diameter / 2)**2 * remaining_ash_trees
+        remaining_ash_trees_y.append(remaining_ash_trees)
+        cumulative_basal_area_y.append(basal_area)
+
+        # Calculate CTLA value for the remaining ash trees
+        ctla_value = calculate_ash_ctla_value(current_diameter, replacement_cost_per_cm_ash, condition_rating_ash, location_factor_ash, species_rating_ash)
+        ctla_values_control.append(ctla_value)
+
+        # Print yearly report
+        total_trees = round(remaining_ash_trees + cumulative_replanted)
+        print(f"Year {year}:")
+        print(f"  - Tree Mortality: {annual_mortality}")
+        print(f"  - Cumulative Mortality: {cumulative_mortality}")
+        print(f"  - Remaining Ash Trees: {remaining_ash_trees}")
+        print(f"  - Replanted Trees This Year: {replant_per_year}")
+        print(f"  - Cumulative Replanted Trees: {cumulative_replanted}")
+        print(f"  - Total Trees: {total_trees}\n")
+
+    return years_x, remaining_ash_trees_y, cumulative_basal_area_y, ctla_values_control
+    
+# Simulation for Removal and Replant
+def simulate_removal_replant(years, starting_ash_trees, background_mortality_rate, new_tree_mortality_rate, removal_start_year, replant_start_year, stage4_start_year, removal_percentage, starting_diameter, growth_rate, starting_diameter_new, growth_rate_new):
+    # Initialize variables
+    remaining_ash_trees = starting_ash_trees
+    new_trees = 0
+    current_diameter = starting_diameter
+    current_diameter_new = starting_diameter_new
+    ctla_values_ash = []
+    ctla_values_new = []
+
+    # Calculate the number of trees to preemptively remove and replant each year
+    trees_to_remove_annually = round(starting_ash_trees * removal_percentage)
+    trees_to_replant_annually = round(starting_ash_trees * removal_percentage)
+
+    # Lists for plotting
+    years_x = [0]  # Include year 0
+    remaining_ash_trees_y = [starting_ash_trees]
+    total_trees_y = [starting_ash_trees]
+    cumulative_basal_area_ash_y = [np.pi * (starting_diameter / 2)**2 * starting_ash_trees]
+    cumulative_basal_area_new_y = [0]
+
+    for year in range(1, years + 1):
+        # Apply background mortality rate for ash trees in Stage 1 and Stage 4
+        if year < removal_start_year or year >= stage4_start_year:
+            ash_tree_mortality = round(remaining_ash_trees * background_mortality_rate)
+            remaining_ash_trees = max(remaining_ash_trees - ash_tree_mortality, 0)
+
+        # Apply removals and replanting in Stage 2 and Stage 3
+        if year >= removal_start_year and year < stage4_start_year:
+            removed_this_year = min(trees_to_remove_annually, remaining_ash_trees) if remaining_ash_trees > 0 else 0
+            remaining_ash_trees -= removed_this_year
+            new_trees += min(trees_to_replant_annually, starting_ash_trees - (remaining_ash_trees + new_trees))
+
+        # Apply mortality rate to new trees in all stages after replanting starts
+        new_tree_mortality = round(new_trees * new_tree_mortality_rate)
+        new_trees = max(new_trees - new_tree_mortality, 0)
+
+        # Update diameter and calculate basal area for ash trees
+        current_diameter += growth_rate
+        basal_area_ash = np.pi * (current_diameter / 2)**2 * remaining_ash_trees
+        cumulative_basal_area_ash_y.append(basal_area_ash)
+
+        # Calculate CTLA value for the remaining ash trees
+        ctla_value_ash = calculate_ash_ctla_value(current_diameter, replacement_cost_per_cm_ash, condition_rating_ash, location_factor_ash, species_rating_ash)
+        ctla_values_ash.append(ctla_value_ash)
+        
+        # Update diameter and calculate basal area for new trees
+        current_diameter_new += growth_rate_new
+        basal_area_new = np.pi * (current_diameter_new / 2)**2 * new_trees
+        cumulative_basal_area_new_y.append(basal_area_new)
+
+        # Calculate CTLA value for the new trees
+        ctla_value_new = calculate_nonash_ctla_value(current_diameter_new, replacement_cost_per_cm_nonash, condition_rating_nonash, location_factor_nonash, species_rating_nonash)
+        ctla_values_new.append(ctla_value_new)
+
+        # Record the year and the number of remaining trees
+        years_x.append(year)
+        remaining_ash_trees_y.append(remaining_ash_trees)
+        total_trees_y.append(remaining_ash_trees + new_trees)
+        
+        # Print yearly report
+        print(f"Year {year}:")
+        print(f"  - Remaining Ash Trees: {remaining_ash_trees}")
+        print(f"  - New Trees (Different Species): {new_trees}")
+        print(f"  - Total Trees (Ash + New): {remaining_ash_trees + new_trees}\n")
+
+    return years_x, remaining_ash_trees_y, total_trees_y, cumulative_basal_area_ash_y, cumulative_basal_area_new_y, ctla_values_ash, ctla_values_new
+
+# Simulation for injections
+def simulate_ash_trees_with_insecticide(years, starting_ash_trees, background_mortality_rate, eab_mortality_rate, stage2_start_year, stage3_start_year, starting_diameter, growth_rate):
+    # Initialize variables
+    remaining_ash_trees = starting_ash_trees
+    current_diameter = starting_diameter
+    ctla_values_injection = []  # List to store CTLA values for ash trees
+
+    # Lists for plotting
+    years_x = [0]  # Include year 0
+    remaining_ash_trees_y = [starting_ash_trees]
+    cumulative_basal_area_y = [np.pi * (starting_diameter / 2)**2 * starting_ash_trees]
+
+    for year in range(1, years + 1):
+        # Stage 1 and 2: Background mortality rate for ash trees
+        if year < stage3_start_year:
+            mortality = round(remaining_ash_trees * background_mortality_rate)
+        # Stage 3: EAB surge with additional mortality
+        else:
+            mortality = round(remaining_ash_trees * eab_mortality_rate) + round(remaining_ash_trees * background_mortality_rate)
+
+        remaining_ash_trees = max(remaining_ash_trees - mortality, 0)
+
+        # Update diameter and calculate basal area
+        current_diameter += growth_rate
+        basal_area = np.pi * (current_diameter / 2)**2 * remaining_ash_trees
+
+        # Calculate CTLA value for the remaining ash trees
+        ctla_value = calculate_ash_ctla_value(current_diameter, replacement_cost_per_cm_ash, condition_rating_ash, location_factor_ash, species_rating_ash)
+        ctla_values_injection.append(ctla_value)
+
+        # Record the year and the number of remaining trees
+        years_x.append(year)
+        remaining_ash_trees_y.append(remaining_ash_trees)
+        cumulative_basal_area_y.append(basal_area)
+
+        # Print yearly report
+        print(f"Year {year}:")
+        print(f"  - Remaining Ash Trees: {remaining_ash_trees}\n")
+
+    return years_x, remaining_ash_trees_y, cumulative_basal_area_y, ctla_values_injection
+
+# Simulation for no EAB
+def simulate_ash_trees_basic(years, starting_ash_trees, background_mortality_rate, starting_diameter, growth_rate):
+    # Initialize variables
+    remaining_ash_trees = starting_ash_trees
+    current_diameter = starting_diameter
+    ctla_values_basic = []  # List to store CTLA values
+
+    # Lists for plotting
+    years_x = [0]  # Include year 0
+    remaining_ash_trees_y = [starting_ash_trees]
+    cumulative_basal_area_y = [np.pi * (starting_diameter / 2)**2 * starting_ash_trees]
+
+    for year in range(1, years + 1):
+        # Apply background mortality rate for ash trees
+        mortality = round(remaining_ash_trees * background_mortality_rate)
+        remaining_ash_trees = max(remaining_ash_trees - mortality, 0)
+
+        # Update diameter and calculate basal area
+        current_diameter += growth_rate
+        basal_area = np.pi * (current_diameter / 2)**2 * remaining_ash_trees
+
+        # Calculate CTLA value for the remaining ash trees
+        ctla_value = calculate_ash_ctla_value(current_diameter, replacement_cost_per_cm_ash, condition_rating_ash, location_factor_ash, species_rating_ash)
+        ctla_values_basic.append(ctla_value)
+
+        # Record the year, number of remaining trees, and cumulative basal area
+        years_x.append(year)
+        remaining_ash_trees_y.append(remaining_ash_trees)
+        cumulative_basal_area_y.append(basal_area)
+
+        # Print yearly report
+        print(f"Year {year}:")
+        print(f"  - Remaining Ash Trees: {remaining_ash_trees}\n")
+
+    return years_x, remaining_ash_trees_y, cumulative_basal_area_y, ctla_values_basic
+
+# Run simulations and get data for plotting
+years_x_control, remaining_trees_y_control, cumulative_basal_area_y_control, ctla_values_control = simulate_control(years, starting_ash_trees, replant_per_year_control, stage2_start_year_control, stage3_start_year_control, Rn_control, Rs_control, Na_control, starting_diameter, growth_rate)
+years_x_removal, remaining_ash_trees_y_removal, total_trees_y_removal, cumulative_basal_area_ash_y_removal, cumulative_basal_area_new_y_removal, ctla_values_ash_removal, ctla_values_new_removal = simulate_removal_replant(years, starting_ash_trees, background_mortality_rate, new_tree_mortality_rate, removal_start_year, replant_start_year, stage4_start_year, removal_percentage, starting_diameter, growth_rate, starting_diameter_new, growth_rate_new)
+years_x_no_eab, remaining_trees_y_no_eab, cumulative_basal_area_y_no_eab, ctla_values_no_eab = simulate_ash_trees_basic(years, starting_ash_trees, background_mortality_rate, starting_diameter, growth_rate)
+years_x_injection, remaining_trees_y_injection, cumulative_basal_area_y_injection, ctla_values_injection = simulate_ash_trees_with_insecticide(years, starting_ash_trees, background_mortality_rate, eab_mortality_rate, stage2_start_year, stage3_start_year, starting_diameter, growth_rate)
+
+# Plotting the number of trees
+plt.figure(figsize=(10, 6))
+plt.plot(years_x_control, remaining_trees_y_control, marker='o', linestyle='-', color='b', label='Control: Remaining Ash Trees')
+plt.plot(years_x_removal, remaining_ash_trees_y_removal, marker='x', linestyle='-', color='r', label='Removal/Replant: Remaining Ash Trees')
+plt.plot(years_x_removal, total_trees_y_removal, marker='^', linestyle='-', color='g', label='Removal/Replant: Total Trees (Ash + New)')
+plt.plot(years_x_no_eab, remaining_trees_y_no_eab, marker='s', linestyle='-', color='purple', label='No EAB: Remaining Ash Trees')
+plt.plot(years_x_injection, remaining_trees_y_injection, marker='d', linestyle='-', color='orange', label='Injection: Remaining Ash Trees')
+plt.title('Comparative Analysis of Ash Tree Management Strategies')
+plt.xlabel('Year')
+plt.ylabel('Number of Trees')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Plotting cumulative basal area
+plt.figure(figsize=(10, 6))
+plt.plot(years_x_control, cumulative_basal_area_y_control, marker='o', linestyle='-', color='b', label='Control: Cumulative Basal Area')
+plt.plot(years_x_removal, cumulative_basal_area_ash_y_removal, marker='x', linestyle='-', color='r', label='Removal/Replant: Cumulative Basal Area - Ash Trees')
+plt.plot(years_x_removal, cumulative_basal_area_new_y_removal, marker='^', linestyle='-', color='g', label='Removal/Replant: Cumulative Basal Area - New Trees')
+plt.plot(years_x_no_eab, cumulative_basal_area_y_no_eab, marker='s', linestyle='-', color='m', label='No EAB: Cumulative Basal Area')
+plt.title('Cumulative Basal Area over Time')
+plt.xlabel('Year')
+plt.ylabel('Basal Area (sq cm)')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Plotting CTLA values for each simulation
+plt.figure(figsize=(12, 8))
+plt.plot(years_x_control, ctla_values_control, label='Control', marker='o', linestyle='-')
+plt.plot(years_x_removal, ctla_values_removal, label='Removal and Replant', marker='x', linestyle='--')
+plt.plot(years_x_no_eab, ctla_values_no_eab, label='No EAB', marker='^', linestyle='-.')
+plt.plot(years_x_injection, ctla_values_injection, label='Injection', marker='s', linestyle=':')
+plt.title('CTLA Values Over Time for Different Management Strategies')
+plt.xlabel('Year')
+plt.ylabel('CTLA Value')
+plt.legend()
+plt.grid(True)
+plt.show()
