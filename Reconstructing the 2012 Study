@@ -38,9 +38,9 @@ new_tree_mortality_rate = 0.02 # Mortality rate of replanted trees
 replant_per_year_control = 0
 stage2_start_year_control = 1 # Starting year of EAB invasion
 stage3_start_year_control = 7 # Starting year of EAB Surge
-Rn_control = 0.99 # Normal ash survival rate without EAB present
+Rn_control = 0.98 # Normal ash survival rate without EAB present
 Rs_control = 0.80 # Ash survival rate after tipping point with EAB present
-Na_control = 0.01 # Normal ash mortality rate without EAB present
+Na_control = 0.02 # Normal ash mortality rate without EAB present
 
 # Parameters specific to Removal and Replant simulation
 removal_start_year = 1  # Year to start removals
@@ -60,7 +60,7 @@ tree_planting_cost = 300 # Planting and establishment cost ($) per each new tree
 insecticide_cost_per_cm = 5.51 # Insecticide cost ($) (bi-annual) per cm DBH
 
 # Simulation for Control (No Intervention)
-def simulate_control(years, starting_ash_trees, replant_per_year, stage2_start_year, stage3_start_year, Rn, Rs, Na, starting_diameter, growth_rate):
+def simulate_control(years, starting_ash_trees, replant_per_year, stage2_start_year, stage3_start_year, Rn_control, Rs_control, Na_control, starting_diameter, growth_rate):
     # Initialize variables
     remaining_ash_trees = starting_ash_trees
     cumulative_mortality = 0
@@ -87,23 +87,23 @@ def simulate_control(years, starting_ash_trees, replant_per_year, stage2_start_y
 
         if year < stage2_start_year:
             # Stage 1 (Pre-EAB)
-            mortality_rate = Na
+            mortality_rate = Na_control
         elif year < stage3_start_year:
             # Stage 2 (EAB Arrived)
             Yn = year - stage2_start_year
-            mortality_rate = ((Rn - Rs) / (1 + math.exp(4 - Yn))) + Na
+            mortality_rate = ((Rn_control - Rs_control) / (1 + math.exp(4 - Yn))) + Na_control
         else:
             # Stage 3 (EAB Surge)
-            mortality_rate = 1 - Rs
+            mortality_rate = 1 - Rs_control
 
         # Calculate annual mortality and removal costs
         annual_mortality = round(remaining_ash_trees * mortality_rate)
-        removal_cost = annual_mortality * current_diameter * removal_cost_per_cm
         remaining_ash_trees -= annual_mortality
         cumulative_mortality += annual_mortality
 
         # Calculate maintenance costs for surviving trees
         maintenance_cost = remaining_ash_trees * current_diameter * maintenance_cost_per_cm
+        removal_cost = annual_mortality * current_diameter * removal_cost_per_cm
 
         # Calculate basal area
         basal_area = np.pi * (current_diameter / 2)**2 * remaining_ash_trees
@@ -117,7 +117,8 @@ def simulate_control(years, starting_ash_trees, replant_per_year, stage2_start_y
         # Update total management cost
         annual_management_cost = removal_cost + maintenance_cost
         total_management_cost += annual_management_cost
-        annual_management_cost_y.append(total_management_cost)
+        annual_management_cost_y.append(annual_management_cost)
+        net_values = ctla_value - annual_management_cost
 
         # Print yearly report
         total_trees = round(remaining_ash_trees + cumulative_replanted)
@@ -132,7 +133,7 @@ def simulate_control(years, starting_ash_trees, replant_per_year, stage2_start_y
         print(f"  - Cumulative Replanted Trees: {cumulative_replanted}")
         print(f"  - Total Trees: {total_trees}\n")
 
-    return years_x, remaining_ash_trees_y, cumulative_basal_area_y, ctla_values_control, annual_management_cost_y
+    return years_x, remaining_ash_trees_y, cumulative_basal_area_y, ctla_values_control, annual_management_cost_y, net_values
 
 # Simulation for Removal and Replant
 def simulate_removal_replant(years, starting_ash_trees, background_mortality_rate, new_tree_mortality_rate, removal_start_year, replant_start_year, stage4_start_year, removal_percentage, starting_diameter, growth_rate, starting_diameter_new, growth_rate_new, removal_cost_per_cm, tree_planting_cost, maintenance_cost_per_cm):
@@ -147,6 +148,7 @@ def simulate_removal_replant(years, starting_ash_trees, background_mortality_rat
     ctla_values_new = [initial_ctla_value_new]
     total_management_cost = 0
     ash_tree_mortality = 0
+    net_value = initial_ctla_value_new + initial_ctla_value_ash
 
     # Calculate the number of trees to preemptively remove and replant each year
     trees_to_remove_annually = round(starting_ash_trees * removal_percentage)
@@ -159,6 +161,7 @@ def simulate_removal_replant(years, starting_ash_trees, background_mortality_rat
     cumulative_basal_area_ash_y = [np.pi * (starting_diameter / 2)**2 * starting_ash_trees]
     cumulative_basal_area_new_y = [0]
     annual_management_cost_y = [0]
+    net_value = []
 
     for year in range(1, years + 1):
         # Apply background mortality rate for ash trees in Stage 1 and Stage 4
@@ -171,8 +174,9 @@ def simulate_removal_replant(years, starting_ash_trees, background_mortality_rat
             removed_this_year = min(trees_to_remove_annually, remaining_ash_trees)
             removal_cost = removed_this_year * current_diameter * removal_cost_per_cm
             remaining_ash_trees -= removed_this_year
-            new_trees += min(trees_to_replant_annually, starting_ash_trees - remaining_ash_trees)
-            tree_planting_cost_total = new_trees * tree_planting_cost
+            new_trees_planted = min(trees_to_replant_annually, starting_ash_trees - remaining_ash_trees)
+            tree_planting_cost_total = new_trees_planted * tree_planting_cost
+            new_trees += new_trees_planted
 
         # Calculate maintenance costs for both remaining ash and new trees
         ash_tree_maintenance_cost = remaining_ash_trees * current_diameter * maintenance_cost_per_cm
@@ -206,6 +210,7 @@ def simulate_removal_replant(years, starting_ash_trees, background_mortality_rat
                                                      species_rating_nonash) * new_trees
         ctla_values_new.append(ctla_value_new)
         combined_ctla_values_removal = [ash + new for ash, new in zip(ctla_values_ash, ctla_values_new)]
+        net_value = combined_ctla_values_removal -  annual_management_cost_y
 
         # Record the year and the number of remaining trees
         years_x.append(year)
@@ -228,7 +233,7 @@ def simulate_removal_replant(years, starting_ash_trees, background_mortality_rat
         print(f"  - Cumulative Management Cost: ${total_management_cost:.2f}\n")
 
     return (years_x, remaining_ash_trees_y, total_trees_y, cumulative_basal_area_ash_y, cumulative_basal_area_new_y,
-            combined_ctla_values_removal, annual_management_cost_y, total_management_cost)
+            combined_ctla_values_removal, annual_management_cost_y, total_management_cost, net_value)
 
 # Simulation for injections
 def simulate_ash_trees_with_insecticide(years, starting_ash_trees, background_mortality_rate, eab_mortality_rate, stage2_start_year, stage3_start_year, starting_diameter, growth_rate):
@@ -246,6 +251,7 @@ def simulate_ash_trees_with_insecticide(years, starting_ash_trees, background_mo
     remaining_ash_trees_y = [starting_ash_trees]
     cumulative_basal_area_y = [np.pi * (starting_diameter / 2)**2 * starting_ash_trees]
     annual_management_cost_y = [0]
+    net_value = []
 
     for year in range(1, years + 1):
         # Stage 1 and 2: Background mortality rate for ash trees
@@ -275,6 +281,10 @@ def simulate_ash_trees_with_insecticide(years, starting_ash_trees, background_mo
         total_management_cost += annual_management_cost
         annual_management_cost_y.append(annual_management_cost)
 
+        # Calculate the net value for this year
+        net_value_for_year = ctla_values_injection[-1] - annual_management_cost
+        net_value.append(net_value_for_year)
+
         # Record the year and the number of remaining trees
         years_x.append(year)
         remaining_ash_trees_y.append(remaining_ash_trees)
@@ -290,7 +300,7 @@ def simulate_ash_trees_with_insecticide(years, starting_ash_trees, background_mo
         print(f"  - Total Annual Management Cost: ${annual_management_cost:.2f}")
         print(f"  - Cumulative Management Cost: ${total_management_cost:.2f}\n")
 
-    return years_x, remaining_ash_trees_y, cumulative_basal_area_y, ctla_values_injection, annual_management_cost_y
+    return years_x, remaining_ash_trees_y, cumulative_basal_area_y, ctla_values_injection, annual_management_cost_y, net_value
 
 # Simulation for no EAB
 def simulate_ash_trees_basic(years, starting_ash_trees, background_mortality_rate, starting_diameter, growth_rate):
@@ -355,11 +365,11 @@ years_x_injection, remaining_trees_y_injection, cumulative_basal_area_y_injectio
 
 # Plotting the number of trees
 plt.figure(figsize=(10, 6))
-plt.plot(years_x_control, remaining_trees_y_control, marker='o', linestyle='-', color='b', label='Control: Remaining Ash Trees')
-plt.plot(years_x_removal, remaining_ash_trees_y_removal, marker='x', linestyle='-', color='r', label='Removal/Replant: Remaining Ash Trees')
-plt.plot(years_x_removal, total_trees_y_removal, marker='^', linestyle='-', color='g', label='Removal/Replant: Total Trees (Ash + New)')
-plt.plot(years_x_no_eab, remaining_trees_y_no_eab, marker='s', linestyle='-', color='purple', label='No EAB: Remaining Ash Trees')
-plt.plot(years_x_injection, remaining_trees_y_injection, marker='d', linestyle='-', color='orange', label='Injection: Remaining Ash Trees')
+plt.plot(years_x_no_eab, remaining_trees_y_no_eab, marker='s', linestyle='-', color='purple', label='No EAB')
+plt.plot(years_x_control, remaining_trees_y_control, marker='o', linestyle='-', color='b', label='Control')
+plt.plot(years_x_removal, remaining_ash_trees_y_removal, marker='x', linestyle='-', color='r', label='Removal and Replant: Ash Trees')
+plt.plot(years_x_removal, total_trees_y_removal, marker='^', linestyle='-', color='g', label='Removal and Replant: Total Trees')
+plt.plot(years_x_injection, remaining_trees_y_injection, marker='d', linestyle='-', color='orange', label='Injection')
 plt.title('Number of Trees over Time')
 plt.xlabel('Year')
 plt.ylabel('Number of Trees')
@@ -369,10 +379,10 @@ plt.show()
 
 # Plotting cumulative basal area
 plt.figure(figsize=(10, 6))
-plt.plot(years_x_control, cumulative_basal_area_y_control, marker='o', linestyle='-', color='b', label='Control')
-plt.plot(years_x_removal, cumulative_basal_area_ash_y_removal, marker='x', linestyle='-', color='r', label='Removal/Replant: Ash Trees')
-plt.plot(years_x_removal, cumulative_basal_area_new_y_removal, marker='^', linestyle='-', color='g', label='Removal/Replant: New Trees')
 plt.plot(years_x_no_eab, cumulative_basal_area_y_no_eab, marker='s', linestyle='-', color='m', label='No EAB')
+plt.plot(years_x_control, cumulative_basal_area_y_control, marker='o', linestyle='-', color='b', label='Control')
+plt.plot(years_x_removal, cumulative_basal_area_ash_y_removal, marker='x', linestyle='-', color='r', label='Removal and Replant: Ash Trees')
+plt.plot(years_x_removal, cumulative_basal_area_new_y_removal, marker='^', linestyle='-', color='g', label='Removal and Replant: New Trees')
 plt.plot(years_x_injection, cumulative_basal_area_y_injection, marker='*', linestyle = '-', color='b', label = 'Injection')
 plt.title('Cumulative Basal Area over Time')
 plt.xlabel('Year')
@@ -383,10 +393,10 @@ plt.show()
 
 # Plotting CTLA values for each simulation
 plt.figure(figsize=(12, 8))
+plt.plot(years_x_no_eab, ctla_values_basic, label='No EAB', marker='^', linestyle='-.')
 plt.plot(years_x_control, ctla_values_control, label='Control', marker='o', linestyle='-')
 plt.plot(years_x_removal, ctla_values_removal, label='Removal and Replant', marker='x', linestyle='--')
 plt.plot(years_x_injection, ctla_values_injection, label='Injection', marker='s', linestyle=':')
-plt.plot(years_x_no_eab, ctla_values_basic, label='No EAB', marker='^', linestyle='-.')
 plt.title('Value of Trees')
 plt.xlabel('Year')
 plt.ylabel('CTLA Value ($)')
@@ -396,10 +406,10 @@ plt.show()
 
 # Plot management costs
 plt.figure(figsize=(12, 8))
-plt.plot(years_x_control, annual_management_cost_control, label='Control', marker='o', linestyle='-')
-plt.plot(years_x_injection, annual_management_cost_injection, label='Injection', marker='^', linestyle='-.')
-plt.plot(years_x_removal, annual_management_cost_y_removal, label='Remove and Replant', marker='^', linestyle='-.')
 plt.plot(years_x_no_eab, annual_management_cost_no_eab, label='No EAB', marker='s', linestyle=':')
+plt.plot(years_x_control, annual_management_cost_control, label='Control', marker='o', linestyle='-')
+plt.plot(years_x_removal, annual_management_cost_y_removal, label='Removal and Replant', marker='^', linestyle='-.')
+plt.plot(years_x_injection, annual_management_cost_injection, label='Injection', marker='^', linestyle='-.')
 plt.title('Annual Management Costs Over Time for Different Management Strategies')
 plt.xlabel('Year')
 plt.ylabel('Annual Management Cost ($)')
@@ -410,13 +420,27 @@ plt.show()
 # Plot cumulative management costs
 plt.figure(figsize=(12, 8))
 # Cumulative costs can be calculated by using a cumulative sum function, np.cumsum, on the annual costs
+plt.plot(years_x_no_eab, np.cumsum(annual_management_cost_no_eab), label='No EAB', marker='s', linestyle=':')
 plt.plot(years_x_control, np.cumsum(annual_management_cost_control), label='Control', marker='o', linestyle='-')
 plt.plot(years_x_removal, np.cumsum(annual_management_cost_y_removal), label='Removal and Replant', marker='x', linestyle='--')
 plt.plot(years_x_injection, np.cumsum(annual_management_cost_injection), label='Injection', marker='^', linestyle='-.')
-plt.plot(years_x_no_eab, np.cumsum(annual_management_cost_no_eab), label='No EAB', marker='s', linestyle=':')
 plt.title('Cumulative Management Costs Over Time for Different Management Strategies')
 plt.xlabel('Year')
 plt.ylabel('Cumulative Management Cost ($)')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Plotting the net CTLA value over time for each strategy
+
+plt.figure(figsize=(12, 8))
+plt.plot(years_x_no_eab, net_value_no_eab, label='No EAB', marker='s', linestyle=':')
+plt.plot(years_x_control, net_value_control, label='Control', marker='o', linestyle='-')
+plt.plot(years_x_removal, net_value_removal, label='Removal and Replant', marker='x', linestyle='--')
+plt.plot(years_x_injection, net_value_injection, label='Injection', marker='^', linestyle='-.')
+plt.title('Net CTLA Value Over Time for Different Management Strategies')
+plt.xlabel('Year')
+plt.ylabel('Net CTLA Value ($)')
 plt.legend()
 plt.grid(True)
 plt.show()
